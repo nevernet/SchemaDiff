@@ -97,7 +97,7 @@ def _parse_column_def(col_def: exp.ColumnDef, dialect: str) -> Optional[Column]:
     constraints = col_def.constraints
     if constraints:
         for c in constraints:
-            if isinstance(c, (exp.NotNullColumnConstraint, exp.NotNullConstraint)):
+            if isinstance(c, (exp.NotNullColumnConstraint)):
                 nullable = False
     
     # Get default
