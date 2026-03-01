@@ -1,0 +1,5 @@
+-- 测试: ADD COLUMN
+CREATE TABLE test_add (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    name VARCHAR(100)
+);

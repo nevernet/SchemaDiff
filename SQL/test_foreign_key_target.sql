@@ -1,0 +1,14 @@
+-- 测试: FOREIGN KEY (添加外键约束)
+CREATE TABLE test_fk_parent (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    name VARCHAR(100),
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE test_fk_child (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    parent_id BIGINT NOT NULL,
+    title VARCHAR(100),
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (parent_id) REFERENCES test_fk_parent(id) ON DELETE CASCADE ON UPDATE CASCADE
+);
