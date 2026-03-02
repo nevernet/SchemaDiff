@@ -1,1 +1,1 @@
-sqlglot>=20.0.0
+sqlglat>=20.0.0
