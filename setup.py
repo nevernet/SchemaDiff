@@ -27,7 +27,7 @@ setup(
     ],
     python_requires=">=3.8",
     install_requires=[
-        "sqlglat>=20.0.0",
+        "sqlglot>=20.0.0",
     ],
     entry_points={
         "console_scripts": [
