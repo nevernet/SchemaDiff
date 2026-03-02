@@ -51,7 +51,7 @@ def _parse_create_table(stmt: exp.Create, dialect: str) -> Optional[Table]:
     table_name = None
     
     if hasattr(stmt.this, 'this'):
-        table_name = stmt.this.this
+        table_name = stmt.this.this.name if hasattr(stmt.this.this, "name") else stmt.this.this
     elif hasattr(stmt.this, 'name'):
         table_name = stmt.this.name
     
@@ -72,10 +72,19 @@ def _parse_create_table(stmt: exp.Create, dialect: str) -> Optional[Table]:
                 table.columns[column.name] = column
         elif isinstance(item, exp.Constraint):
             _parse_constraint(item, table, dialect)
+        elif isinstance(item, exp.PrimaryKeyColumnConstraint):
+            _parse_constraint(item, table, dialect)
+        elif isinstance(item, exp.UniqueColumnConstraint):
+            _parse_constraint(item, table, dialect)
+        elif isinstance(item, exp.IndexColumnConstraint):
+            _parse_constraint(item, table, dialect)
         elif isinstance(item, exp.ForeignKey):
             fk = _parse_foreign_key(item, dialect)
             if fk:
                 table.fks[fk.name] = fk
+        elif isinstance(item, (exp.UniqueColumnConstraint, exp.IndexColumnConstraint)):
+            # Handle UNIQUE INDEX in CREATE TABLE expressions
+            _parse_constraint(item, table, dialect)
     
     return table
 
@@ -90,7 +99,7 @@ def _parse_column_def(col_def: exp.ColumnDef, dialect: str) -> Optional[Column]:
     data_type = "UNKNOWN"
     kind = col_def.args.get("kind")
     if kind:
-        data_type = kind.name.upper()
+        data_type = kind.sql(dialect=dialect).upper()
     
     # Get nullable
     nullable = True
@@ -125,18 +134,61 @@ def _parse_column_def(col_def: exp.ColumnDef, dialect: str) -> Optional[Column]:
 
 def _parse_constraint(constraint: exp, table: Table, dialect: str):
     """Parse table-level constraints."""
-    if isinstance(constraint, exp.PrimaryKeyConstraint):
+    # Handle IndexColumnConstraint (non-unique INDEX in CREATE TABLE)
+    if isinstance(constraint, exp.IndexColumnConstraint):
+        idx_name = None
+        cols = []
+        if constraint.this:
+            idx_name = constraint.this.name if hasattr(constraint.this, 'name') else None
+        if hasattr(constraint, 'expressions') and constraint.expressions:
+            for c in constraint.expressions:
+                if hasattr(c, 'this') and hasattr(c.this, 'name'):
+                    cols.append(c.this.name)
+                elif hasattr(c, 'name'):
+                    cols.append(c.name)
+                else:
+                    cols.append(str(c))
+        if idx_name and cols:
+            idx = Index(name=idx_name, columns=cols, unique=False)
+            table.indexes[idx.name] = idx
+        return
+    
+    if isinstance(constraint, exp.PrimaryKeyColumnConstraint):
+        # PRIMARY KEY (col1, col2) - table-level primary key
         cols = []
         if constraint.this and hasattr(constraint.this, 'expressions'):
             cols = [c.name for c in constraint.this.expressions]
         table.primary_key = cols
     
-    elif isinstance(constraint, exp.UniqueConstraint):
+    elif isinstance(constraint, exp.UniqueColumnConstraint):
+        # UNIQUE (col) or UNIQUE INDEX idx_name (col) - table-level unique
+        # constraint.this is Schema: this=idx_name, expressions=[col1, col2]
+        idx_name = None
         cols = []
-        if constraint.this and hasattr(constraint.this, 'expressions'):
-            cols = [c.name for c in constraint.this.expressions]
-        if cols:
-            idx = Index(name=f"uk_{cols[0]}", columns=cols, unique=True)
+        if constraint.this:
+            # Check if this is a Schema with index name
+            if hasattr(constraint.this, 'this') and hasattr(constraint.this.this, 'name'):
+                idx_name = constraint.this.this.name
+            # Check if this is a list of columns (not a Schema)
+            elif hasattr(constraint.this, '__iter__'):
+                for c in constraint.this:
+                    if hasattr(c, 'name'):
+                        cols.append(c.name)
+                    else:
+                        cols.append(str(c))
+            # Schema.expressions contains the column list
+            if hasattr(constraint.this, 'expressions') and constraint.this.expressions:
+                cols = []
+                for c in constraint.this.expressions:
+                    if hasattr(c, 'name'):
+                        cols.append(c.name)
+                    else:
+                        cols.append(str(c))
+        # Generate index name if not provided
+        if not idx_name and cols:
+            idx_name = f"uk_{cols[0]}"
+        if idx_name and cols:
+            idx = Index(name=idx_name, columns=cols, unique=True)
             table.indexes[idx.name] = idx
     
     elif isinstance(constraint, exp.ForeignKey):
@@ -163,12 +215,26 @@ def _parse_foreign_key(fk_expr: exp.ForeignKey, dialect: str) -> Optional[Foreig
     if not ref:
         return None
     
-    ref_table = ref.name if hasattr(ref, "name") else str(ref)
+    # ref is a Reference object: ref.args['this'] is Schema
+    # Schema.this = Table (with table name)
+    # Schema.expressions = list of column Identifiers
+    ref_table = None
+    if hasattr(ref, 'args') and ref.args.get('this'):
+        schema = ref.args['this']
+        if hasattr(schema, 'this') and hasattr(schema.this, 'name'):
+            ref_table = schema.this.name
+        elif hasattr(schema, 'this'):
+            ref_table = schema.this
     
     ref_columns = []
-    if hasattr(ref, "expressions") and ref.expressions:
-        for c in ref.expressions:
-            ref_columns.append(c.name if hasattr(c, "name") else str(c))
+    if hasattr(ref, 'args') and ref.args.get('this'):
+        schema = ref.args['this']
+        if hasattr(schema, 'expressions') and schema.expressions:
+            for c in schema.expressions:
+                if hasattr(c, 'name'):
+                    ref_columns.append(c.name)
+                else:
+                    ref_columns.append(str(c))
     
     on_delete = None
     ondel = fk_expr.args.get("ondelete")
