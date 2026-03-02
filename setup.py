@@ -7,7 +7,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="nevernet-sql-diff",
-    version="0.1.1",
+    version="0.1.2",
     author="NeverNet",
     author_email="contact@nevernet.com",
     description="SQL Schema Diff and Migration Generator",
@@ -31,7 +31,7 @@ setup(
     ],
     entry_points={
         "console_scripts": [
-            "nevernet-sql-diff=main:main",
+            "nevernet-sql-diff=migration.__main__:main",
         ],
     },
     include_package_data=True,
