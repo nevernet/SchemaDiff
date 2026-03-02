@@ -65,11 +65,42 @@ def _parse_create_table(stmt: exp.Create, dialect: str) -> Optional[Table]:
     if hasattr(stmt.this, 'expressions'):
         expressions = stmt.this.expressions
     
+    # First pass: parse columns
     for item in expressions:
         if isinstance(item, exp.ColumnDef):
             column = _parse_column_def(item, dialect)
             if column:
                 table.columns[column.name] = column
+                # Check for column-level REFERENCES
+                if item.constraints:
+                    for c in item.constraints:
+                        # Check if it's a ColumnConstraint with kind=Reference
+                        ref_obj = None
+                        if isinstance(c, exp.ColumnConstraint):
+                            kind = c.args.get("kind")
+                            if isinstance(kind, exp.Reference):
+                                ref_obj = kind
+                        elif isinstance(c, exp.Reference):
+                            ref_obj = c
+                        
+                        if ref_obj:
+                            ref = ref_obj.args.get("this")
+                            if ref:
+                                ref_table = None
+                                ref_columns = []
+                                if hasattr(ref, 'this') and hasattr(ref.this, 'name'):
+                                    ref_table = ref.this.name
+                                if hasattr(ref, 'expressions') and ref.expressions:
+                                    for col in ref.expressions:
+                                        if hasattr(col, 'name'):
+                                            ref_columns.append(col.name)
+                                fk = ForeignKey(
+                                    name=f"fk_{column.name}",
+                                    columns=[column.name],
+                                    ref_table=ref_table,
+                                    ref_columns=ref_columns
+                                )
+                                table.fks[fk.name] = fk
         elif isinstance(item, exp.Constraint):
             _parse_constraint(item, table, dialect)
         elif isinstance(item, exp.PrimaryKeyColumnConstraint):
@@ -104,24 +135,51 @@ def _parse_column_def(col_def: exp.ColumnDef, dialect: str) -> Optional[Column]:
     # Get nullable
     nullable = True
     constraints = col_def.constraints
+    fk_reference = None  # Column-level REFERENCES
+    
     if constraints:
         for c in constraints:
             if isinstance(c, (exp.NotNullColumnConstraint)):
                 nullable = False
+            elif isinstance(c, exp.DefaultColumnConstraint):
+                default = c.this.sql(dialect=dialect) if c.this else None
+            elif isinstance(c, exp.AutoIncrementColumnConstraint):
+                auto_increment = True
+            elif isinstance(c, exp.Reference):
+                # Column-level REFERENCES (e.g., user_id INT REFERENCES users(id))
+                fk_reference = c
     
-    # Get default
+    # Re-parse constraints for defaults and auto_increment
     default = None
+    auto_increment = False
     if constraints:
         for c in constraints:
             if isinstance(c, exp.DefaultColumnConstraint):
                 default = c.this.sql(dialect=dialect) if c.this else None
-    
-    # Get auto_increment
-    auto_increment = False
-    if constraints:
-        for c in constraints:
-            if isinstance(c, exp.AutoIncrementColumnConstraint):
+            elif isinstance(c, exp.AutoIncrementColumnConstraint):
                 auto_increment = True
+    
+    # Check for inline FK from column-level REFERENCES
+    if fk_reference:
+        ref = fk_reference.args.get("this")
+        if ref:
+            ref_table = None
+            ref_columns = []
+            if hasattr(ref, 'this') and hasattr(ref.this, 'name'):
+                ref_table = ref.this.name
+            if hasattr(ref, 'expressions') and ref.expressions:
+                for c in ref.expressions:
+                    if hasattr(c, 'name'):
+                        ref_columns.append(c.name)
+            
+            # Create FK for this column
+            fk = ForeignKey(
+                name=f"fk_{name}",
+                columns=[name],
+                ref_table=ref_table,
+                ref_columns=ref_columns
+            )
+            # This will be added to table.fks by caller
     
     return Column(
         name=name,

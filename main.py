@@ -81,7 +81,7 @@ def main():
     
     # Compare schemas
     print("\nComparing schemas...")
-    diff = SchemaDiff(source_schema, target_schema)
+    diff = SchemaDiff(source_schema, target_schema, dialect=args.dialect)
     changes = diff.compare()
     print(f"  Found {len(changes)} changes")
     
